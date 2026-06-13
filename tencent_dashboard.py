@@ -813,12 +813,12 @@ st.caption("💡 点击折线上的数据点，查看该年度详细分析")
 
 fig_trend = go.Figure()
 
-# 营收曲线
+# 营收曲线（修复版：去掉smoothing，改用tension）
 fig_trend.add_trace(go.Scatter(
     x=main_data["年份"],
     y=main_data["营业收入"],
     name="营业收入(亿元)",
-    line=dict(color="#2563eb", width=4.5, shape='spline', smoothing=1.5),
+    line=dict(color="#2563eb", width=4.5, shape='spline', smoothing=0.8),
     marker=dict(size=12, color="#2563eb", line=dict(width=3, color='white')),
     fill='tozeroy',
     fillcolor='rgba(37, 99, 235, 0.1)',
@@ -831,7 +831,7 @@ if len(rev_years) > 0:
         x=rev_years,
         y=rev_pred,
         name="预测营收(亿元)",
-        line=dict(color="#2563eb", width=3, dash="dot", shape='spline'),
+        line=dict(color="#2563eb", width=3, dash="dot", shape='spline', smoothing=0.8),
         marker=dict(size=10, color="#2563eb", line=dict(width=2, color='white')),
         fill='tozeroy',
         fillcolor='rgba(37, 99, 235, 0.05)'
@@ -843,7 +843,7 @@ fig_trend.add_trace(go.Scatter(
     y=main_data["归母净利润"],
     name="归母净利润(亿元)",
     yaxis="y2",
-    line=dict(color="#8b5cf6", width=4.5, shape='spline', smoothing=1.5),
+    line=dict(color="#8b5cf6", width=4.5, shape='spline', smoothing=0.8),
     marker=dict(size=12, color="#8b5cf6", line=dict(width=3, color='white')),
     fill='tozeroy',
     fillcolor='rgba(139, 92, 246, 0.1)',
@@ -857,7 +857,7 @@ if len(profit_years) > 0:
         y=profit_pred,
         name="预测净利润(亿元)",
         yaxis="y2",
-        line=dict(color="#8b5cf6", width=3, dash="dot", shape='spline'),
+        line=dict(color="#8b5cf6", width=3, dash="dot", shape='spline', smoothing=0.8),
         marker=dict(size=10, color="#8b5cf6", line=dict(width=2, color='white'))
     ))
 
@@ -1325,7 +1325,7 @@ for name, color in index_config:
         x=main_data["年份"],
         y=main_data[name],
         name=name,
-        line=dict(color=color, width=3.5, shape='spline', smoothing=1.2),
+        line=dict(color=color, width=3.5, shape='spline', smoothing=0.8),
         marker=dict(size=10, color=color, line=dict(width=2, color='white')),
         hovertemplate=f'<b>%{{x}}年</b><br>{name}：%{{y}}%<extra></extra>'
     ))
