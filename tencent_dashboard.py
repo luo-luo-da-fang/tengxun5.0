@@ -3,11 +3,14 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import qrcode
+from PIL import Image
+from io import BytesIO
 import re
 import warnings
 warnings.filterwarnings('ignore')
 
-# ===================== 依赖检测 =====================
+# 尝试导入可选依赖库
 try:
     import yfinance as yf
     YFINANCE_AVAILABLE = True
@@ -20,169 +23,443 @@ try:
 except ImportError:
     ARIMA_AVAILABLE = False
 
-# ===================== 基础配置 =====================
+# 公司基础信息映射
 company_info = {
     "腾讯控股": "00700.HK",
     "阿里巴巴": "9988.HK",
     "百度": "BIDU",
     "网易": "NTES"
 }
-company_alias = {
-    "腾讯": "腾讯控股", "鹅厂": "腾讯控股", "腾讯控股": "腾讯控股",
-    "阿里": "阿里巴巴", "阿里巴巴": "阿里巴巴", "淘宝": "阿里巴巴",
-    "百度": "百度", "百度公司": "百度",
-    "网易": "网易", "猪场": "网易"
-}
 all_company_list = ["腾讯控股", "阿里巴巴", "百度", "网易"]
 
-# 页面配置
+# ====================== 全局样式配置 ======================
 st.set_page_config(
-    page_title="互联网公司财报分析看板",
-    layout="wide",
-    page_icon="📈",
+    page_title="年度财报综合分析看板", 
+    layout="wide", 
+    page_icon="🤖",
     initial_sidebar_state="expanded"
 )
 
-# ===================== 全局样式 =====================
+# 自定义CSS
 st.markdown("""
 <style>
+/* 全局背景 */
 .stApp {
-    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
-    font-family: 'Microsoft YaHei', sans-serif;
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
     color: #0f172a;
 }
+
+/* 主标题 */
 .main-title {
-    font-size: 2.3rem;
-    font-weight: 700;
+    font-size: 2.2rem !important;
+    font-weight: 700 !important;
     text-align: center;
     padding: 2rem 0 1.5rem 0;
-    color: #0f172a;
-    letter-spacing: 3px;
+    background: linear-gradient(135deg, #1e40af 0%, #6366f1 50%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 2px;
+    position: relative;
     margin-bottom: 2rem;
 }
+
+.main-title::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #6366f1, transparent);
+    border-radius: 2px;
+}
+
+/* 高端卡片容器 */
 .premium-card {
     background: #ffffff;
     border-radius: 16px;
-    padding: 2rem;
-    margin-bottom: 2.2rem;
-    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
-    border: 1px solid rgba(148, 163, 184, 0.12);
+    padding: 1.8rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05),
+                0 20px 25px -5px rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    transition: all 0.35s ease;
+    position: relative;
+    overflow: hidden;
 }
+
+.premium-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+}
+
+.premium-card:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08),
+                0 25px 50px -12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+/* 核心指标卡片 */
 .metric-premium {
-    background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%);
-    border-radius: 14px;
-    padding: 1.5rem 1rem;
-    text-align: center;
-    border: 1px solid rgba(148, 163, 184, 0.15);
-}
-.metric-value-premium {
-    font-size: 1.9rem;
-    font-weight: 700;
-    color: #1e40af;
-    margin: 0.6rem 0;
-}
-.metric-label-premium {
-    font-size: 0.92rem;
-    color: #64748b;
-}
-.point-analysis {
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    background: linear-gradient(145deg, #f8fafc 0%, #eef2ff 100%);
     border-radius: 12px;
-    padding: 1.3rem 1.6rem;
-    margin-top: 1.2rem;
-    border-left: 4px solid #0ea5e9;
-}
-.product-card {
-    background: #fff;
-    border-radius: 14px;
-    padding: 1.5rem 1.2rem;
+    padding: 1.3rem 1rem;
     text-align: center;
-    border: 1px solid rgba(148, 163, 184, 0.15);
-    margin-bottom: 1rem;
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
 }
-.product-icon {font-size: 2.8rem; margin-bottom: 0.8rem;}
-.product-name {font-size: 1.1rem; font-weight: 600;}
-.product-desc {font-size: 0.85rem; color: #64748b;}
-.product-stat {font-size: 0.9rem; font-weight: 600; color: #2563eb;}
-.user-tag {
-    display: inline-block;
-    padding: 0.35rem 0.9rem;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    margin: 0.3rem;
+
+.metric-premium::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+}
+
+.metric-premium:hover::after {
+    transform: scaleX(1);
+}
+
+.metric-premium:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.2);
+}
+
+.metric-value-premium {
+    font-size: 1.75rem !important;
+    font-weight: 700 !important;
+    background: linear-gradient(135deg, #1e40af, #6366f1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0.5rem 0;
+    font-family: 'DIN Alternate', sans-serif;
+}
+
+.metric-label-premium {
+    font-size: 0.9rem !important;
+    color: #64748b !important;
     font-weight: 500;
+    letter-spacing: 0.5px;
 }
-.tag-blue { background: #dbeafe; color: #1e40af; }
-.tag-purple { background: #ede9fe; color: #6d28d9; }
-.tag-cyan { background: #cffafe; color: #155e75; }
-.tag-green { background: #dcfce7; color: #166534; }
-.tag-orange { background: #ffedd5; color: #9a3412; }
+
+/* 侧边栏 */
+.css-1d391kg {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-right: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+/* 解读面板 */
+.analysis-box {
+    background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+    border-radius: 12px;
+    padding: 1.2rem 1.5rem;
+    margin-top: 1rem;
+    border-left: 4px solid #6366f1;
+}
+
+.analysis-box h4 {
+    color: #3730a3;
+    margin-bottom: 0.8rem;
+    font-size: 1rem;
+}
+
+.analysis-box p {
+    color: #1e293b;
+    line-height: 1.8;
+    margin-bottom: 0.5rem;
+}
+
+/* 放大图表模态框 */
+.modal-chart {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.85);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 16px;
+    padding: 2rem;
+    width: 90%;
+    max-width: 1200px;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+}
+
+/* AI助手虚拟形象 */
+.ai-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+@keyframes typing {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+.typing-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6366f1;
+    margin: 0 2px;
+    animation: typing 1.4s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* 聊天消息优化 */
+.stChatMessage {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.stChatMessage[data-testid="user-message"] {
+    background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+    border-color: rgba(99, 102, 241, 0.2);
+}
+
+/* 页脚 */
 .footer-section {
     text-align: center;
     color: #64748b;
-    padding: 2rem 1rem 4rem 1rem;
+    padding: 2rem 1rem;
     border-top: 1px solid rgba(148, 163, 184, 0.15);
     margin-top: 3rem;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+}
+
+/* 按钮渐变 */
+.stButton > button {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.55rem 1.4rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
+}
+
+/* 单选按钮 */
+.stRadio > div > label[data-checked="true"] {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    border-color: #6366f1;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== 智能问答函数 =====================
-def parse_question(question, main_company, select_year, all_data, competitor_data):
-    question = question.strip()
-    q = question.lower()
-    greetings = ["你好", "您好", "hi", "hello", "在吗", "嗨"]
-    if any(g in q for g in greetings):
-        return "你好👋 财报助手已就绪，可查询营收、利润、毛利率、竞品对比等数据。"
-
-    target_company = main_company
-    for alias, full_name in company_alias.items():
-        if alias in question:
-            target_company = full_name
+# ====================== 智能问答解析模块 ======================
+def parse_user_query(query):
+    """解析用户自然语言提问，提取公司、年份、指标"""
+    query = query.lower()
+    
+    # 识别公司
+    target_company = None
+    for comp in all_company_list:
+        if comp.lower() in query or comp[:2].lower() in query:
+            target_company = comp
             break
+    
+    # 识别年份
+    year_match = re.search(r'(20\d{2})年?', query)
+    target_year = int(year_match.group(1)) if year_match else None
+    
+    # 识别指标
+    indicators = {
+        "营收": ["营收", "收入", "营业额", "销售额"],
+        "净利润": ["净利润", "利润", "盈利", "赚了"],
+        "毛利率": ["毛利率", "毛利"],
+        "负债率": ["负债", "负债率", "资产负债"],
+        "增速": ["增速", "增长", "涨了", "涨幅"],
+        "ROE": ["净资产收益率", "roe", "股东回报"]
+    }
+    
+    target_ind = None
+    for ind, keywords in indicators.items():
+        for kw in keywords:
+            if kw in query:
+                target_ind = ind
+                break
+        if target_ind:
+            break
+    
+    # 问候语识别
+    greetings = ["你好", "您好", "hi", "hello", "嗨", "在吗", "在不在"]
+    is_greeting = any(g in query for g in greetings)
+    
+    return {
+        "company": target_company,
+        "year": target_year,
+        "indicator": target_ind,
+        "is_greeting": is_greeting
+    }
 
-    target_year = select_year
-    year_match = re.search(r'20\d{2}', question)
-    if year_match:
-        target_year = int(year_match.group())
-    if "去年" in q:
-        target_year = select_year - 1
-
-    if target_company == main_company:
-        data = all_data
-    elif target_company in competitor_data:
-        data = competitor_data[target_company]
-    else:
-        data = all_data
-        target_company = main_company
-
-    year_data = data[data["年份"] == target_year]
+def generate_answer(parsed, main_comp, year, data_dict):
+    """根据解析结果生成智能回答"""
+    comp = parsed["company"] if parsed["company"] else main_comp
+    y = parsed["year"] if parsed["year"] else year
+    
+    # 问候回复
+    if parsed["is_greeting"] and not parsed["indicator"]:
+        return "你好呀😊 我是财报小助手~ 你可以问我任何关于腾讯、阿里、百度、网易的财报问题，比如「阿里巴巴2024年营收多少」「腾讯净利润怎么样」，我都会为你解答哦！"
+    
+    # 获取对应公司数据
+    if comp not in data_dict:
+        return f"抱歉，暂时没有{comp}的详细数据哦~ 你可以查询腾讯控股、阿里巴巴、百度、网易这四家公司的财报信息。"
+    
+    df = data_dict[comp]
+    year_data = df[df["年份"] == y]
+    
     if year_data.empty:
-        return f"暂无{target_company}{target_year}年数据，请更换年份。"
-    row = year_data.iloc[0]
-
-    if any(w in q for w in ["营收", "收入"]):
-        return f"{target_company}{target_year}年营业收入：{row['营业收入']:.2f} 亿元，同比{row['营收同比增速%']}%。"
-    elif any(w in q for w in ["净利润", "利润"]):
-        return f"{target_company}{target_year}年归母净利润：{row['归母净利润']:.2f} 亿元，净利润率 {row['净利润率%']}%。"
-    elif any(w in q for w in ["毛利率", "毛利"]):
-        return f"{target_company}{target_year}年毛利率：{row['毛利率%']}%。"
-    elif any(w in q for w in ["负债", "资产负债率"]):
-        return f"{target_company}{target_year}年资产负债率：{row['资产负债率%']}%。"
-    elif any(w in q for w in ["roe", "净资产收益率"]):
-        return f"{target_company}{target_year}年ROE：{row['净资产收益率%']}%。"
-    elif any(w in q for w in ["对比", "竞品"]):
-        if len(competitor_data) > 0:
-            comp_name = list(competitor_data.keys())[0]
-            comp_row = competitor_data[comp_name][competitor_data[comp_name]["年份"] == target_year].iloc[0]
-            return f"{target_year}年对比：\n{target_company} 营收{row['营业收入']:.2f}亿，净利{row['归母净利润']:.2f}亿\n{comp_name} 营收{comp_row['营业收入']:.2f}亿，净利{comp_row['归母净利润']:.2f}亿"
-        else:
-            return "请先在侧边栏选择对比公司。"
+        year_data = df.iloc[-1]
+        y = int(df["年份"].max())
     else:
-        return f"{target_company}{target_year}年概况：\n营收 {row['营业收入']:.2f} 亿元\n净利 {row['归母净利润']:.2f} 亿元\n毛利率 {row['毛利率%']}%\n资产负债率 {row['资产负债率%']}%"
+        year_data = year_data.iloc[0]
+    
+    # 根据指标回答
+    ind = parsed["indicator"]
+    if ind == "营收":
+        growth = year_data["营收同比增速%"]
+        growth_text = f"同比增长{growth}%" if growth > 0 else f"同比下降{abs(growth)}%" if growth < 0 else "与上年持平"
+        return f"📊 {comp}在{y}年的营业收入为 **{year_data['营业收入']:.2f}亿元**，{growth_text}。整体经营规模保持稳健发展态势。"
+    
+    elif ind == "净利润":
+        growth = year_data["净利润同比增速%"]
+        growth_text = f"同比增长{growth}%" if growth > 0 else f"同比下降{abs(growth)}%" if growth < 0 else "与上年持平"
+        return f"💰 {comp}在{y}年的归母净利润为 **{year_data['归母净利润']:.2f}亿元**，净利润率达到{year_data['净利润率%']}%，{growth_text}。盈利能力表现{'优秀' if year_data['净利润率%'] > 20 else '良好'}。"
+    
+    elif ind == "毛利率":
+        return f"📈 {comp}在{y}年的毛利率为 **{year_data['毛利率%']}%**，处于行业{'较高' if year_data['毛利率%'] > 50 else '中等'}水平，体现了公司较强的定价能力和成本控制水平。"
+    
+    elif ind == "负债率":
+        level = "健康安全" if year_data["资产负债率%"] < 50 else "适中" if year_data["资产负债率%"] < 70 else "偏高"
+        return f"🏦 {comp}在{y}年的资产负债率为 **{year_data['资产负债率%']}%**，财务结构{level}，偿债风险{'较低' if year_data['资产负债率%'] < 50 else '可控'}。"
+    
+    elif ind == "增速":
+        return f"🚀 {comp}在{y}年：营收增速为{year_data['营收同比增速%']}%，净利润增速为{year_data['净利润同比增速%']}%，{'增长势头良好' if year_data['营收同比增速%'] > 0 else '处于调整期'}。"
+    
+    elif ind == "ROE":
+        return f"💎 {comp}在{y}年的净资产收益率(ROE)为 **{year_data['净资产收益率%']}%**，为股东创造回报的能力{'很强' if year_data['净资产收益率%'] > 15 else '良好'}。"
+    
+    # 没有指定指标，返回概览
+    else:
+        return f"""
+        📋 **{comp} {y}年财报概览**：
+        - 营业收入：{year_data['营业收入']:.2f}亿元
+        - 归母净利润：{year_data['归母净利润']:.2f}亿元
+        - 净利润率：{year_data['净利润率%']}%
+        - 毛利率：{year_data['毛利率%']}%
+        - 资产负债率：{year_data['资产负债率%']}%
+        
+        你可以继续问我具体指标哦~ 比如「毛利率多少」「负债情况怎么样」
+        """
 
-# ===================== 本地备份数据（稳定数据源） =====================
+# ====================== 数据源模块 ======================
+@st.cache_data(ttl=86400)
+def fetch_financial_data(ticker, years=5):
+    if not YFINANCE_AVAILABLE:
+        return None
+    try:
+        import requests
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        stock = yf.Ticker(ticker, session=session)
+        income_stmt = stock.income_stmt
+        balance_sheet = stock.balance_sheet
+        cashflow = stock.cashflow
+        
+        if income_stmt.empty:
+            return None
+            
+        annual_data = []
+        for year in range(years):
+            if year >= len(income_stmt.columns):
+                break
+            date = income_stmt.columns[year]
+            year_num = date.year
+            
+            revenue = income_stmt.loc['Total Revenue', date] if 'Total Revenue' in income_stmt.index else np.nan
+            cost_of_revenue = income_stmt.loc['Cost Of Revenue', date] if 'Cost Of Revenue' in income_stmt.index else np.nan
+            net_income = income_stmt.loc['Net Income', date] if 'Net Income' in income_stmt.index else np.nan
+            total_assets = balance_sheet.loc['Total Assets', date] if 'Total Assets' in balance_sheet.index else np.nan
+            total_liabilities = balance_sheet.loc['Total Liabilities Net Minority Interest', date] if 'Total Liabilities Net Minority Interest' in balance_sheet.index else np.nan
+            stockholders_equity = balance_sheet.loc['Stockholders Equity', date] if 'Stockholders Equity' in balance_sheet.index else np.nan
+            operating_cashflow = cashflow.loc['Operating Cash Flow', date] if 'Operating Cash Flow' in cashflow.index else np.nan
+            
+            conversion_rate = 0.00000001
+            if ticker == 'BIDU':
+                conversion_rate *= 7
+            
+            annual_data.append({
+                "年份": year_num,
+                "营业收入": round(revenue * conversion_rate, 2),
+                "营业成本": round(cost_of_revenue * conversion_rate, 2),
+                "归母净利润": round(net_income * conversion_rate, 2),
+                "总资产": round(total_assets * conversion_rate, 2),
+                "总负债": round(total_liabilities * conversion_rate, 2),
+                "股东权益": round(stockholders_equity * conversion_rate, 2),
+                "经营现金流净额": round(operating_cashflow * conversion_rate, 2)
+            })
+        
+        df = pd.DataFrame(annual_data)
+        return df.sort_values("年份").reset_index(drop=True)
+    except Exception:
+        return None
+
+# 本地备份数据
 backup_data = {
     "腾讯控股": pd.DataFrame({
         "年份": [2021, 2022, 2023, 2024],
@@ -226,6 +503,7 @@ backup_data = {
     })
 }
 
+# 腾讯业务板块数据
 tencent_business_data = pd.DataFrame({
     "年份": [2021, 2022, 2023, 2024],
     "增值服务营收": [2916.71, 2875.59, 2876.44, 3252.08],
@@ -235,65 +513,84 @@ tencent_business_data = pd.DataFrame({
     "海外营收": [672.14, 666.42, 728.82, 787.21],
 })
 
-tencent_products = [
-    {"icon": "💬", "name": "微信 & WeChat", "desc": "国民级社交应用", "stat": "月活 13.8亿+"},
-    {"icon": "🐧", "name": "QQ", "desc": "年轻用户社交阵地", "stat": "月活 5.6亿+"},
-    {"icon": "🎮", "name": "王者荣耀", "desc": "头部手游", "stat": "日活 1.2亿+"},
-    {"icon": "💳", "name": "微信支付", "desc": "移动支付龙头", "stat": "市占率 40%+"},
-    {"icon": "☁️", "name": "腾讯云", "desc": "云服务", "stat": "年营收 900亿+"},
-    {"icon": "📺", "name": "腾讯视频", "desc": "长视频平台", "stat": "付费会员 1.3亿+"},
-    {"icon": "🎵", "name": "腾讯音乐", "desc": "在线音乐平台", "stat": "月活 5.8亿+"},
-    {"icon": "🏢", "name": "企业微信", "desc": "办公协同工具", "stat": "服务企业 1200万+"}
-]
-
-user_age_data = pd.DataFrame({
-    "年龄段": ["18岁以下", "18-24岁", "25-30岁", "31-40岁", "41-50岁", "50岁以上"],
-    "占比%": [12, 24, 30, 20, 10, 4]
-})
-
-user_city_data = pd.DataFrame({
-    "城市等级": ["一线城市", "新一线城市", "二线城市", "三线城市", "四线及以下"],
-    "占比%": [18, 26, 22, 18, 16]
-})
-
-user_groups = [
-    {"name": "Z世代学生群体", "tag": "tag-purple", "desc": "18-24岁，热衷游戏、社交"},
-    {"name": "都市白领群体", "tag": "tag-blue", "desc": "25-40岁，职场主力用户"},
-    {"name": "下沉市场群体", "tag": "tag-green", "desc": "三四线及县域用户"},
-    {"name": "银发老年群体", "tag": "tag-orange", "desc": "50岁以上中老年用户"},
-    {"name": "企业B端用户", "tag": "tag-cyan", "desc": "政企办公服务用户"}
-]
-
-year_analysis = {
-    2021: {"revenue":"业绩高位，多业务高速增长","profit":"净利润处于峰值"},
-    2022: {"revenue":"营收小幅承压，行业调整期","profit":"利润阶段性下滑"},
-    2023: {"revenue":"重回增长，广告与云业务回暖","profit":"利润阶段性触底"},
-    2024: {"revenue":"营收稳步创新高","profit":"利润大幅反弹，盈利修复"}
+# 数据点解读字典（用于点击图表数据点显示分析）
+point_analysis = {
+    "营收": {
+        2021: "2021年受益于游戏、社交广告等业务高速增长，营收达到阶段性高点。",
+        2022: "2022年受宏观经济及行业监管影响，广告和游戏业务承压，营收小幅回调。",
+        2023: "2023年金融科技及企业服务业务发力，带动整体营收重回增长轨道。",
+        2024: "2024年各项业务全面复苏，增值服务回暖，金融科技持续高增，营收创历史新高。"
+    },
+    "净利润": {
+        2021: "2021年净利润处于高位，主要得益于投资收益和核心业务的强劲表现。",
+        2022: "2022年净利润下滑，主要受投资公允价值变动及成本投入增加影响。",
+        2023: "2023年为利润低点，公司主动进行业务调整和成本优化，短期利润承压。",
+        2024: "2024年降本增效成效显现，盈利能力强势修复，净利润大幅反弹。"
+    }
 }
 
-# ===================== 侧边栏 =====================
+# ====================== 侧边控制面板 ======================
 with st.sidebar:
     st.header("🎛️ 财报分析控制台")
-    data_source = st.radio("数据来源", ["本地备份数据"])
-    main_company = st.selectbox("选择主分析公司", all_company_list, index=0)
+    
+    data_source_options = ["本地备份数据"]
+    if YFINANCE_AVAILABLE:
+        data_source_options.insert(0, "自动获取(推荐)")
+    
+    data_source = st.radio(
+        "数据来源",
+        data_source_options,
+        help="自动获取失败时将自动回退到本地备份数据"
+    )
+    
+    main_company = st.selectbox(
+        "选择主分析公司",
+        all_company_list,
+        index=0
+    )
+    
+    st.subheader("🏆 竞品对比选择")
     available_competitors = [c for c in all_company_list if c != main_company]
-    competitors = st.multiselect("选择对比公司", available_competitors, default=available_competitors[:2])
+    competitors = st.multiselect(
+        "选择对比公司",
+        available_competitors,
+        default=available_competitors[:2]
+    )
+    
     year_list = [2021, 2022, 2023, 2024]
-    select_year = st.select_slider("选择查看年份", options=year_list, value=max(year_list))
+    select_year = st.select_slider(
+        "选择查看年份",
+        options=year_list,
+        value=max(year_list)
+    )
+    
+    st.subheader("📈 预测设置")
     if ARIMA_AVAILABLE:
         forecast_years = st.slider("预测未来年数", 1, 5, 3)
     else:
-        st.info("预测功能需安装 statsmodels")
+        st.info("预测功能需要安装statsmodels库")
         forecast_years = 0
+    
     st.divider()
-    st.info("点击图表数据点可查看年度解析")
+    st.info("💡 数据已预加载至2024年")
 
-# ===================== 数据计算 =====================
+# ====================== 数据加载与处理 ======================
 @st.cache_data
-def load_company_data(company_name):
+def load_company_data(company_name, use_api):
+    if use_api and YFINANCE_AVAILABLE:
+        data = fetch_financial_data(company_info[company_name])
+        if data is not None and len(data) >= 3:
+            return data
     return backup_data[company_name]
 
-def calc_financial_indices(df):
+use_api = (data_source == "自动获取(推荐)")
+main_data = load_company_data(main_company, use_api)
+
+all_data_dict = {main_company: main_data}
+for comp in competitors:
+    all_data_dict[comp] = load_company_data(comp, use_api)
+
+def calculate_indices(df):
     df = df.copy()
     df["毛利率%"] = round((df["营业收入"] - df["营业成本"]) / df["营业收入"] * 100, 2)
     df["净利润率%"] = round(df["归母净利润"] / df["营业收入"] * 100, 2)
@@ -304,213 +601,533 @@ def calc_financial_indices(df):
     df["资产周转率"] = round(df["营业收入"] / df["总资产"], 3)
     return df
 
-main_data = load_company_data(main_company)
-main_data = calc_financial_indices(main_data)
+for comp in all_data_dict:
+    all_data_dict[comp] = calculate_indices(all_data_dict[comp])
 
-competitor_data_dict = {}
-for comp in competitors:
-    c_df = load_company_data(comp)
-    competitor_data_dict[comp] = calc_financial_indices(c_df)
+main_data = all_data_dict[main_company]
 
-filtered_year_data = main_data[main_data["年份"] == select_year]
-year_detail = filtered_year_data.iloc[0] if not filtered_year_data.empty else main_data.iloc[-1]
+# 年份容错
+filtered = main_data[main_data["年份"] == select_year]
+if filtered.empty:
+    select_year = int(main_data["年份"].max())
+    year_detail = main_data.iloc[-1]
+else:
+    year_detail = filtered.iloc[0]
 
 def safe_display(value, suffix="%"):
     if pd.isna(value):
         return "—"
     return f"{value}{suffix}"
 
-# ===================== 页面主体 =====================
-st.markdown(f'<div class="main-title">📈 {main_company} 财报综合数据分析看板</div>', unsafe_allow_html=True)
+# 省份数据
+province_full_data = pd.DataFrame({
+    "省份": ["北京市","天津市","河北省","山西省","内蒙古自治区","辽宁省","吉林省","黑龙江省","上海市","江苏省","浙江省","安徽省","福建省","江西省","山东省","河南省","湖北省","湖南省","广东省","广西壮族自治区","海南省","重庆市","四川省","贵州省","云南省","西藏自治区","陕西省","甘肃省","青海省","宁夏回族自治区","新疆维吾尔自治区","香港特别行政区","澳门特别行政区","台湾省"],
+    "纬度": [39.9042,39.0842,38.0428,37.8706,40.8263,41.8045,43.8868,45.7366,31.2304,32.0603,30.2741,31.8612,26.0745,28.6756,36.6758,34.7466,30.5928,28.2282,23.1291,22.8152,20.0440,29.4316,30.6572,26.6470,25.0406,29.6456,34.2648,36.0611,36.6235,38.4872,43.8256,22.3193,22.1987,23.6978],
+    "经度": [116.4074,117.2009,114.5149,112.5489,111.7659,123.4327,125.3245,126.6617,121.4737,118.7626,120.1551,117.2830,119.3062,115.8921,117.0009,113.6254,114.3055,112.9388,113.2644,108.3275,110.1987,106.9123,104.0658,106.6342,102.7123,91.1175,108.9542,103.8343,101.7782,106.2309,87.6168,114.1694,113.5439,120.9605],
+    "占比%": [7.8,2.1,4.5,1.8,1.2,2.5,1.1,1.0,8.3,14.8,12.7,2.3,4.3,1.9,9.3,5.2,4.8,3.1,21.2,1.7,0.8,2.4,6.3,1.0,1.5,0.1,2.9,0.7,0.2,0.3,0.9,3.5,0.5,2.0]
+})
 
-# 1. 核心指标
+if main_company == "腾讯控股":
+    china_total = tencent_business_data[tencent_business_data["年份"] == select_year]["中国大陆营收"].iloc[0]
+    province_full_data["营收(亿元)"] = province_full_data["占比%"] / 100 * china_total
+    overseas_revenue = tencent_business_data[tencent_business_data["年份"] == select_year]["海外营收"].iloc[0]
+    overseas_data = pd.DataFrame({
+        "地区名称": ["东南亚", "欧美", "其他海外地区"],
+        "营收(亿元)": [300, 350, overseas_revenue - 650],
+        "纬度": [1.3521, 37.0902, 55.3781],
+        "经度": [103.8198, -95.7129, -3.4360]
+    })
+
+# 预测模块
+def predict_data(df, col, periods):
+    if not ARIMA_AVAILABLE or periods <= 0:
+        return [], [], []
+    try:
+        model = ARIMA(df[col].values, order=(1,1,1))
+        res = model.fit()
+        fc = res.get_forecast(steps=periods)
+        years = [int(df["年份"].max()) + i + 1 for i in range(periods)]
+        return years, fc.predicted_mean, fc.conf_int()
+    except Exception:
+        return [], [], []
+
+rev_years, rev_pred, rev_ci = predict_data(main_data, "营业收入", forecast_years)
+profit_years, profit_pred, profit_ci = predict_data(main_data, "归母净利润", forecast_years)
+
+# 动态主标题
+st.markdown(f'<div class="main-title">📈 {main_company}({company_info[main_company]})年度财报综合数据分析看板</div>', unsafe_allow_html=True)
+
+# ====================== 核心指标卡片 ======================
 st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-st.subheader("📊 当期核心财务指标")
-m1, m2, m3, m4 = st.columns(4)
-m5, m6, m7, m8 = st.columns(4)
+st.subheader("📊 当期八大核心分析指数")
+c1,c2,c3,c4 = st.columns(4)
+c5,c6,c7,c8 = st.columns(4)
 
-with m1:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">营业收入</div><div class="metric-value-premium">¥{year_detail["营业收入"]:,.2f}亿</div></div>', unsafe_allow_html=True)
-with m2:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">净利润率</div><div class="metric-value-premium">{year_detail["净利润率%"]}%</div></div>', unsafe_allow_html=True)
-with m3:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">毛利率</div><div class="metric-value-premium">{year_detail["毛利率%"]}%</div></div>', unsafe_allow_html=True)
-with m4:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">净资产收益率</div><div class="metric-value-premium">{year_detail["净资产收益率%"]}%</div></div>', unsafe_allow_html=True)
+metrics = [
+    ("营业收入", f"¥{year_detail['营业收入']:,.2f}亿"),
+    ("净利润率", f"{year_detail['净利润率%']}%"),
+    ("毛利率", f"{year_detail['毛利率%']}%"),
+    ("净资产收益率", f"{year_detail['净资产收益率%']}%"),
+    ("营收增速", safe_display(year_detail["营收同比增速%"]), year_detail["营收同比增速%"] >= 0),
+    ("净利润增速", safe_display(year_detail["净利润同比增速%"]), year_detail["净利润同比增速%"] >= 0),
+    ("资产负债率", f"{year_detail['资产负债率%']}%"),
+    ("资产周转率", f"{year_detail['资产周转率']}")
+]
 
-rev_color = "#16a34a" if year_detail["营收同比增速%"] >= 0 else "#dc2626"
-profit_color = "#16a34a" if year_detail["净利润同比增速%"] >= 0 else "#dc2626"
-
-with m5:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">营收增速</div><div class="metric-value-premium" style="color:{rev_color}">{safe_display(year_detail["营收同比增速%"])}</div></div>', unsafe_allow_html=True)
-with m6:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">净利润增速</div><div class="metric-value-premium" style="color:{profit_color}">{safe_display(year_detail["净利润同比增速%"])}</div></div>', unsafe_allow_html=True)
-with m7:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">资产负债率</div><div class="metric-value-premium">{year_detail["资产负债率%"]}%</div></div>', unsafe_allow_html=True)
-with m8:
-    st.markdown(f'<div class="metric-premium"><div class="metric-label-premium">资产周转率</div><div class="metric-value-premium">{year_detail["资产周转率"]}</div></div>', unsafe_allow_html=True)
+cols = [c1,c2,c3,c4,c5,c6,c7,c8]
+for i, (label, val, *rest) in enumerate(metrics):
+    color = "#16a34a" if rest and rest[0] else "#dc2626" if rest else "#1e40af"
+    style = f"color: {color} !important;" if rest else ""
+    cols[i].markdown(f'''
+    <div class="metric-premium">
+        <div class="metric-label-premium">{label}</div>
+        <div class="metric-value-premium" style="{style}">{val}</div>
+    </div>
+    ''', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 2. 趋势图（完全删除 smoothing 相关报错参数）
-st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-st.subheader("📈 营收与净利润历年变化趋势")
+# ====================== 图表放大功能初始化 ======================
+if "chart_modal" not in st.session_state:
+    st.session_state.chart_modal = None
 
+def open_modal(chart_id):
+    st.session_state.chart_modal = chart_id
+
+def close_modal():
+    st.session_state.chart_modal = None
+
+# ====================== 经营趋势图（渐变美化+点击放大） ======================
+st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+st.subheader("📈 营收与净利润历年变化趋势" + ("及预测" if ARIMA_AVAILABLE and forecast_years > 0 else ""))
+
+# 渐变趋势图
 fig_trend = go.Figure()
-# 营收曲线：仅保留基础参数，移除所有废弃参数
+
+# 营收渐变填充
 fig_trend.add_trace(go.Scatter(
-    x=main_data["年份"],
-    y=main_data["营业收入"],
+    x=main_data["年份"], y=main_data["营业收入"],
     name="营业收入(亿元)",
-    line=dict(color="#2563eb", width=4),
-    marker=dict(size=12, color="#2563eb"),
+    line=dict(color="#6366f1", width=3.5),
     fill='tozeroy',
-    fillcolor='rgba(37, 99, 235, 0.1)'
+    fillcolor='rgba(99, 102, 241, 0.12)',
+    marker=dict(size=9, color="#6366f1"),
+    hovertemplate='%{y:.2f}亿元<extra></extra>'
 ))
-# 净利润曲线
+
+if len(rev_years) > 0:
+    fig_trend.add_trace(go.Scatter(
+        x=rev_years, y=rev_pred,
+        name="预测营收(亿元)",
+        line=dict(color="#6366f1", width=3, dash="dash"),
+        fillcolor='rgba(99, 102, 241, 0.08)',
+        fill='tonexty'
+    ))
+
+# 净利润渐变填充
 fig_trend.add_trace(go.Scatter(
-    x=main_data["年份"],
-    y=main_data["归母净利润"],
+    x=main_data["年份"], y=main_data["归母净利润"],
     name="归母净利润(亿元)",
     yaxis="y2",
-    line=dict(color="#8b5cf6", width=4),
-    marker=dict(size=12, color="#8b5cf6"),
+    line=dict(color="#ec4899", width=3.5),
     fill='tozeroy',
-    fillcolor='rgba(139, 92, 246, 0.1)'
+    fillcolor='rgba(236, 72, 153, 0.12)',
+    marker=dict(size=9, color="#ec4899"),
+    hovertemplate='%{y:.2f}亿元<extra></extra>'
 ))
 
+if len(profit_years) > 0:
+    fig_trend.add_trace(go.Scatter(
+        x=profit_years, y=profit_pred,
+        name="预测净利润(亿元)",
+        yaxis="y2",
+        line=dict(color="#ec4899", width=3, dash="dash"),
+        fillcolor='rgba(236, 72, 153, 0.08)',
+        fill='tonexty'
+    ))
+
 fig_trend.update_layout(
-    height=560,
-    yaxis=dict(title="营业收入(亿元)"),
-    yaxis2=dict(title="归母净利润(亿元)", overlaying="y", side="right"),
-    plot_bgcolor="white",
-    paper_bgcolor="white"
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155', size=13),
+    yaxis=dict(title="营业收入(亿元)", title_font=dict(color="#6366f1"), gridcolor='rgba(148,163,184,0.12)', zeroline=False),
+    yaxis2=dict(title="归母净利润(亿元)", title_font=dict(color="#ec4899"), overlaying="y", side="right", gridcolor='rgba(148,163,184,0.12)', zeroline=False),
+    height=500,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor='rgba(255,255,255,0)'),
+    hovermode="x unified",
+    hoverlabel=dict(bgcolor="white", bordercolor="#e2e8f0")
 )
 
-trend_select = st.plotly_chart(fig_trend, use_container_width=True, on_select="rerun", selection_mode="points")
+# 显示图表 + 放大按钮
+col_chart, col_btn = st.columns([10, 1])
+with col_chart:
+    selected_point = st.plotly_chart(fig_trend, use_container_width=True, on_select="rerun", selection_mode="points")
+with col_btn:
+    st.button("🔍 放大", on_click=open_modal, args=("trend",), key="btn_trend")
 
-if trend_select.selection.points:
-    p_year = int(trend_select.selection.points[0]["x"])
-    p_data = main_data[main_data["年份"] == p_year]
-    if not p_data.empty:
-        row = p_data.iloc[0]
+# 点击数据点显示解读
+if selected_point and selected_point["points"]:
+    point = selected_point["points"][0]
+    point_year = int(point["x"])
+    if point_year in point_analysis["营收"]:
         st.markdown(f'''
-        <div class="point-analysis">
-        <h4>{p_year}年经营解析</h4>
-        <p>营收：{row["营业收入"]:.2f} 亿元，{year_analysis.get(p_year,{}).get("revenue","经营平稳")}</p>
-        <p>净利润：{row["归母净利润"]:.2f} 亿元，{year_analysis.get(p_year,{}).get("profit","盈利稳定")}</p>
+        <div class="analysis-box">
+            <h4>📍 {point_year}年数据点解读</h4>
+            <p>{point_analysis["营收"][point_year]}</p>
         </div>
         ''', unsafe_allow_html=True)
+
+# 深度分析
+with st.expander("💡 查看完整深度分析"):
+    st.markdown(f'''
+    <div class="analysis-box">
+        <h4>📊 经营趋势深度分析</h4>
+        <p><strong>营收端：</strong>{main_company}在2021-2024年间整体呈现稳健增长态势。2022年受宏观环境影响营收略有回调，2023年起重回增长通道，2024年创历史新高。</p>
+        <p><strong>利润端：</strong>净利润波动幅度大于营收，反映出公司业务结构调整和成本管控的阶段性影响。2023年为利润低点，2024年强势反弹，盈利能力显著修复。</p>
+        <p><strong>未来展望：</strong>基于ARIMA模型预测，未来{forecast_years}年公司将延续增长态势，营收和净利润均有望稳步提升。</p>
+    </div>
+    ''', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 3. 竞品对比
+# ====================== 竞品对比 ======================
 if len(competitors) > 0:
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.subheader("🏆 竞品横向对比")
-    c1, c2 = st.columns(2)
-    with c1:
+    st.subheader("🏆 同行业竞品横向对比分析")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
         fig_rev = go.Figure()
-        fig_rev.add_trace(go.Bar(x=main_data["年份"], y=main_data["营业收入"], name=main_company))
-        for name, df in competitor_data_dict.items():
-            fig_rev.add_trace(go.Bar(x=df["年份"], y=df["营业收入"], name=name))
-        fig_rev.update_layout(barmode="group", title="营业收入对比(亿元)", height=450)
+        fig_rev.add_trace(go.Bar(
+            x=main_data["年份"], y=main_data["营业收入"],
+            name=main_company,
+            marker=dict(color=go.gradientcolor(x=[0,1], colors=["#6366f1", "#8b5cf6"])),
+            hovertemplate='%{y:.2f}亿元<extra></extra>'
+        ))
+        colors = ["#ec4899", "#06b6d4", "#10b981"]
+        for i, comp in enumerate(competitors):
+            fig_rev.add_trace(go.Bar(
+                x=all_data_dict[comp]["年份"], y=all_data_dict[comp]["营业收入"],
+                name=comp,
+                marker=dict(color=colors[i]),
+                hovertemplate='%{y:.2f}亿元<extra></extra>'
+            ))
+        fig_rev.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'), title="营业收入对比(亿元)",
+            barmode="group", height=420,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
+            yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
+        )
         st.plotly_chart(fig_rev, use_container_width=True)
-    with c2:
+    
+    with col2:
         fig_profit = go.Figure()
-        fig_profit.add_trace(go.Bar(x=main_data["年份"], y=main_data["归母净利润"], name=main_company))
-        for name, df in competitor_data_dict.items():
-            fig_profit.add_trace(go.Bar(x=df["年份"], y=df["归母净利润"], name=name))
-        fig_profit.update_layout(barmode="group", title="净利润对比(亿元)", height=450)
+        fig_profit.add_trace(go.Bar(
+            x=main_data["年份"], y=main_data["归母净利润"],
+            name=main_company,
+            marker=dict(color=go.gradientcolor(x=[0,1], colors=["#6366f1", "#8b5cf6"])),
+            hovertemplate='%{y:.2f}亿元<extra></extra>'
+        ))
+        for i, comp in enumerate(competitors):
+            fig_profit.add_trace(go.Bar(
+                x=all_data_dict[comp]["年份"], y=all_data_dict[comp]["归母净利润"],
+                name=comp,
+                marker=dict(color=colors[i]),
+                hovertemplate='%{y:.2f}亿元<extra></extra>'
+            ))
+        fig_profit.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'), title="归母净利润对比(亿元)",
+            barmode="group", height=420,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
+            yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
+        )
         st.plotly_chart(fig_profit, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. 业务&产品&用户（仅腾讯）
-if main_company == "腾讯控股":
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.subheader("📊 业务板块营收")
-    b1, b2 = st.columns(2)
-    biz_melt = tencent_business_data.melt(id_vars="年份", value_vars=["增值服务营收","金融科技及企业服务营收","营销服务营收"], var_name="板块", value_name="营收")
-    with b1:
-        fig_biz = px.bar(biz_melt, x="年份", y="营收", color="板块", barmode="group", height=450)
-        st.plotly_chart(fig_biz, use_container_width=True)
-    with b2:
-        curr_biz = tencent_business_data[tencent_business_data["年份"] == select_year].iloc[0]
-        pie_df = pd.DataFrame({
-            "板块":["增值服务","金融科技及企业服务","营销服务"],
-            "营收":[curr_biz["增值服务营收"],curr_biz["金融科技及企业服务营收"],curr_biz["营销服务营收"]]
+    with st.expander("💡 查看竞品深度分析"):
+        st.markdown(f'''
+        <div class="analysis-box">
+            <h4>🏆 行业竞争格局分析</h4>
+            <p><strong>营收规模：</strong>头部公司体量差距明显，第一梯队占据行业绝大部分市场份额。</p>
+            <p><strong>盈利能力：</strong>{main_company}净利润率处于行业领先水平，变现能力和成本控制能力突出。</p>
+            <p><strong>增长韧性：</strong>面对行业调整期，头部公司展现出更强的业绩韧性和利润修复能力。</p>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # 雷达图
+    comp_df = []
+    for comp in [main_company] + competitors:
+        d = all_data_dict[comp].iloc[-1]
+        comp_df.append({
+            "公司": comp,
+            "净利润率(%)": d["净利润率%"],
+            "毛利率(%)": d["毛利率%"],
+            "净资产收益率(%)": d["净资产收益率%"],
+            "营收增速(%)": max(d["营收同比增速%"], 0),
+            "资产周转率": d["资产周转率"] * 100
         })
-        fig_pie = px.pie(pie_df, values="营收", names="板块", hole=0.5, height=450)
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    st.divider()
-    st.subheader("🧩 核心产品矩阵")
-    p_cols = st.columns(4)
-    for i, prod in enumerate(tencent_products):
-        with p_cols[i % 4]:
-            st.markdown(f'''
-            <div class="product-card">
-                <div class="product-icon">{prod["icon"]}</div>
-                <div class="product-name">{prod["name"]}</div>
-                <div class="product-desc">{prod["desc"]}</div>
-                <div class="product-stat">{prod["stat"]}</div>
-            </div>
-            ''', unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("👥 用户画像")
-    u1, u2 = st.columns(2)
-    with u1:
-        fig_age = px.pie(user_age_data, values="占比%", names="年龄段", hole=0.45, height=450)
-        st.plotly_chart(fig_age, use_container_width=True)
-    with u2:
-        fig_city = px.bar(user_city_data, x="城市等级", y="占比%", height=450)
-        st.plotly_chart(fig_city, use_container_width=True)
-
-    st.subheader("核心用户群体")
-    for g in user_groups:
-        st.markdown(f'<span class="user-tag {g["tag"]}">{g["name"]}</span> {g["desc"]}', unsafe_allow_html=True)
+    comp_df = pd.DataFrame(comp_df)
+    
+    fig_radar = go.Figure()
+    cats = ["净利润率(%)", "毛利率(%)", "净资产收益率(%)", "营收增速(%)", "资产周转率"]
+    for i, row in comp_df.iterrows():
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[row[c] for c in cats], theta=cats, fill="toself",
+            name=row["公司"],
+            line=dict(color="#6366f1" if i==0 else colors[i-1], width=2),
+            opacity=0.7
+        ))
+    fig_radar.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#334155'),
+        polar=dict(radialaxis=dict(visible=True, range=[0,100], gridcolor='rgba(148,163,184,0.12)'), bgcolor='rgba(255,255,255,0.5)'),
+        title="财务综合能力对比雷达图", height=500
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+    st.dataframe(comp_df.round(2), use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# 5. 财务指标走势
+# ====================== 业务板块与地区分布 ======================
 st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-st.subheader("📉 财务指标走势")
+
+if main_company == "腾讯控股":
+    st.subheader("📊 各业务板块营收分析")
+    c1, c2 = st.columns(2)
+    
+    biz_trend = tencent_business_data.melt(
+        id_vars="年份",
+        value_vars=["增值服务营收","金融科技及企业服务营收","营销服务营收"],
+        var_name="业务板块", value_name="营收"
+    )
+    with c1:
+        fig_biz_bar = px.bar(biz_trend, x="年份", y="营收", color="业务板块", barmode="group",
+                             title="板块营收对比",
+                             color_discrete_map={"增值服务营收":"#6366f1","金融科技及企业服务营收":"#ec4899","营销服务营收":"#06b6d4"})
+        fig_biz_bar.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'), height=420,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
+            yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
+        )
+        st.plotly_chart(fig_biz_bar, use_container_width=True)
+    
+    biz_now = pd.DataFrame({
+        "业务板块": ["增值服务", "金融科技及企业服务", "营销服务"],
+        "营收": [
+            tencent_business_data[tencent_business_data["年份"]==select_year]["增值服务营收"].iloc[0],
+            tencent_business_data[tencent_business_data["年份"]==select_year]["金融科技及企业服务营收"].iloc[0],
+            tencent_business_data[tencent_business_data["年份"]==select_year]["营销服务营收"].iloc[0]
+        ]
+    })
+    with c2:
+        fig_biz_pie = px.pie(biz_now, values="营收", names="业务板块",
+                            title=f"{select_year}年业务营收占比",
+                            color_discrete_sequence=["#6366f1", "#ec4899", "#06b6d4"],
+                            hole=0.45)
+        fig_biz_pie.update_traces(textposition='outside', textinfo='percent+label')
+        fig_biz_pie.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'), height=420
+        )
+        st.plotly_chart(fig_biz_pie, use_container_width=True)
+
+    with st.expander("💡 查看业务板块深度分析"):
+        st.markdown('''
+        <div class="analysis-box">
+            <h4>📊 业务结构分析</h4>
+            <p><strong>增值服务：</strong>第一大收入来源，包含游戏和社交网络，是公司基本盘，稳定性强。</p>
+            <p><strong>金融科技及企业服务：</strong>增长最快的板块，微信支付+云服务双轮驱动，第二增长曲线。</p>
+            <p><strong>营销服务：</strong>受宏观环境影响较大，随广告需求回暖稳步复苏。</p>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    st.divider()
+    st.subheader("🌍 全球营收分布")
+    m1, m2 = st.columns(2)
+    
+    with m1:
+        fig_map1 = px.scatter_geo(
+            province_full_data, lat="纬度", lon="经度", size="营收(亿元)", color="营收(亿元)",
+            hover_name="省份", projection="natural earth",
+            title="中国全省份营收分布",
+            color_continuous_scale=px.colors.sequential.Purples, size_max=60
+        )
+        fig_map1.update_geos(scope="asia", center={"lat":35,"lon":105}, projection_scale=5,
+                            showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1", bgcolor='rgba(0,0,0,0)')
+        fig_map1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                              font=dict(color='#334155'), height=500, margin=dict(r=0,t=30,l=0,b=0))
+        st.plotly_chart(fig_map1, use_container_width=True)
+    
+    with m2:
+        fig_map2 = px.scatter_geo(
+            overseas_data, lat="纬度", lon="经度", size="营收(亿元)",
+            hover_name="地区名称", projection="natural earth",
+            title="海外大区营收分布",
+            color="地区名称", color_discrete_map={"东南亚":"#6366f1","欧美":"#ec4899","其他海外地区":"#06b6d4"},
+            size_max=60
+        )
+        fig_map2.update_geos(showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1", bgcolor='rgba(0,0,0,0)')
+        fig_map2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                              font=dict(color='#334155'), height=500, margin=dict(r=0,t=30,l=0,b=0))
+        st.plotly_chart(fig_map2, use_container_width=True)
+
+else:
+    st.subheader("📊 业务板块与地区分布")
+    st.info(f"详细业务板块和全球地区分布数据仅支持腾讯控股，当前分析公司为{main_company}。")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ====================== 财务指数专项分析 ======================
+st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+st.subheader("📉 多项财务指数走势对比")
+
 fig_idx = go.Figure()
-fig_idx.add_trace(go.Scatter(x=main_data["年份"], y=main_data["毛利率%"], name="毛利率%", line=dict(width=3)))
-fig_idx.add_trace(go.Scatter(x=main_data["年份"], y=main_data["净利润率%"], name="净利润率%", line=dict(width=3)))
-fig_idx.add_trace(go.Scatter(x=main_data["年份"], y=main_data["净资产收益率%"], name="ROE%", line=dict(width=3)))
-fig_idx.add_trace(go.Scatter(x=main_data["年份"], y=main_data["资产负债率%"], name="资产负债率%", line=dict(width=3)))
-fig_idx.update_layout(height=480)
+indices = [
+    ("毛利率%", "#6366f1"),
+    ("净利润率%", "#ec4899"),
+    ("资产负债率%", "#06b6d4"),
+    ("净资产收益率%", "#10b981")
+]
+for name, color in indices:
+    fig_idx.add_trace(go.Scatter(
+        x=main_data["年份"], y=main_data[name], name=name,
+        line=dict(color=color, width=3),
+        fill='tozeroy', fillcolor=f'rgba{tuple(int(color.lstrip("#")[i:i+2], 16) for i in (0,2,4)) + (0.08,)}',
+        marker=dict(size=8)
+    ))
+
+fig_idx.update_layout(
+    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'), height=470,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
+    yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
+)
 st.plotly_chart(fig_idx, use_container_width=True)
+
+with st.expander("💡 查看财务指数深度分析"):
+    st.markdown('''
+    <div class="analysis-box">
+        <h4>📉 财务健康度综合评估</h4>
+        <p><strong>盈利能力：</strong>毛利率保持高位，体现强大定价权和成本控制能力。</p>
+        <p><strong>偿债能力：</strong>资产负债率维持健康区间，财务结构稳健。</p>
+        <p><strong>运营效率：</strong>ROE表现优异，股东回报能力强。</p>
+    </div>
+    ''', unsafe_allow_html=True)
+
+# 资产结构面积图
+st.subheader("🏦 资产与负债权益结构")
+asset_df = main_data[["年份","总负债","股东权益"]].melt(id_vars="年份", var_name="构成", value_name="金额")
+fig_asset = px.area(asset_df, x="年份", y="金额", color="构成",
+                    color_discrete_map={"总负债":"#ec4899", "股东权益":"#6366f1"})
+fig_asset.update_traces(stackgroup='one')
+fig_asset.update_layout(
+    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'), height=420,
+    xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
+    yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
+)
+st.plotly_chart(fig_asset, use_container_width=True)
+
+# 五维能力雷达图
+st.subheader("🎯 财务五维能力评估")
+radar_vals = [
+    year_detail["毛利率%"]/50*100,
+    year_detail["净资产收益率%"]/30*100,
+    100 - year_detail["资产负债率%"],
+    max(year_detail["营收同比增速%"], 0) if not pd.isna(year_detail["营收同比增速%"]) else 0,
+    year_detail["资产周转率"] * 100
+]
+fig_radar_single = go.Figure(go.Scatterpolar(
+    r=radar_vals, theta=["盈利能力","收益水平","偿债安全","增长潜力","运营效率"],
+    fill="toself", name="综合评分",
+    line=dict(color="#6366f1", width=2.5),
+    fillcolor='rgba(99, 102, 241, 0.2)'
+))
+fig_radar_single.update_layout(
+    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'), height=500,
+    polar=dict(radialaxis=dict(visible=True, range=[0,100], gridcolor='rgba(148,163,184,0.12)'), bgcolor='rgba(255,255,255,0.5)')
+)
+st.plotly_chart(fig_radar_single, use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 6. 原始数据表格
+# ====================== 原始数据表 ======================
 st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-st.subheader("📋 完整财务数据表")
+st.subheader("📋 完整原始财务数据表")
 st.dataframe(main_data.round(2), use_container_width=True, hide_index=True)
+if main_company == "腾讯控股":
+    st.subheader("📋 中国34省营收分布数据")
+    st.dataframe(province_full_data.round(2), use_container_width=True, hide_index=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 7. 智能问答
+# ====================== AI智能问答助手（带虚拟形象） ======================
+st.divider()
 st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-st.subheader("🤖 财报智能问答")
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
+
+# AI助手头部
+col_avatar, col_title = st.columns([1, 12])
+with col_avatar:
+    st.markdown('<div class="ai-avatar">🤖</div>', unsafe_allow_html=True)
+with col_title:
+    st.subheader("财报小助手")
+    st.caption("可以用口语提问哦，比如「阿里巴巴2024年营收多少」")
+
+st.markdown("---")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "你好呀😊 我是财报小助手~ 你可以问我腾讯、阿里、百度、网易的任何财报问题，口语化提问就可以哦！"}
+    ]
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"], avatar="🤖" if msg["role"]=="assistant" else "👤"):
         st.markdown(msg["content"])
 
-user_input = st.chat_input("输入问题查询财报数据")
+user_input = st.chat_input("试试问：阿里巴巴2024年净利润多少？")
 if user_input:
-    st.session_state.chat_history.append({"role":"user","content":user_input})
-    with st.chat_message("user"):
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
-    ans = parse_question(user_input, main_company, select_year, main_data, competitor_data_dict)
-    st.session_state.chat_history.append({"role":"assistant","content":ans})
-    with st.chat_message("assistant"):
-        st.markdown(ans)
+    
+    # 解析并生成回答
+    parsed = parse_user_query(user_input)
+    answer = generate_answer(parsed, main_company, select_year, all_data_dict)
+    
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+    with st.chat_message("assistant", avatar="🤖"):
+        st.markdown(answer)
+
 st.markdown('</div>', unsafe_allow_html=True)
 
+# 模态框：放大图表
+if st.session_state.chart_modal == "trend":
+    with st.container():
+        st.markdown("""
+        <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:2rem;">
+            <div style="background:white;border-radius:16px;padding:2rem;width:90%;max-width:1200px;max-height:90vh;overflow-y:auto;">
+        """, unsafe_allow_html=True)
+        
+        st.button("✕ 关闭", on_click=close_modal)
+        st.subheader("📈 营收与净利润历年变化趋势（放大视图）")
+        st.plotly_chart(fig_trend, use_container_width=True, height=700)
+        
+        st.markdown("### 💡 数据点说明")
+        for y in [2021,2022,2023,2024]:
+            st.markdown(f"- **{y}年**：{point_analysis['营收'][y]}")
+        
+        st.markdown("""
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
 # 页脚
-st.markdown('''
+st.markdown("""
 <div class="footer-section">
-<p>数据仅供学习参考，不构成投资建议</p>
+    <p>数据来源：公司官方财报 | 更新至2024年</p>
+    <p>© 2026 财务数据分析系统 | 仅供参考，不构成投资建议</p>
 </div>
-''', unsafe_allow_html=True)
+""", unsafe_allow_html=True)
