@@ -9,7 +9,7 @@ import re
 import warnings
 warnings.filterwarnings('ignore')
 
-# ========== 可选依赖导入（没装也不会报错） ==========
+# ========== 可选依赖导入（缺库不崩溃） ==========
 try:
     import qrcode
     QRCODE_AVAILABLE = True
@@ -571,7 +571,7 @@ for i, item in enumerate(metrics):
     ''', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ========== 经营趋势图（修复版） ==========
+# ========== 经营趋势图 ==========
 st.markdown('<div class="premium-card">', unsafe_allow_html=True)
 st.subheader("📈 营收与净利润历年变化趋势" + ("及预测" if ARIMA_AVAILABLE and forecast_years > 0 else ""))
 
@@ -641,7 +641,6 @@ fig_trend.update_layout(
 # 显示图表 + 放大展开
 col_chart, col_btn = st.columns([10, 1])
 with col_chart:
-    # 修复：正确获取选择事件
     selected_event = st.plotly_chart(
         fig_trend,
         use_container_width=True,
@@ -652,16 +651,15 @@ with col_chart:
 with col_btn:
     show_large = st.button("🔍 放大", key="btn_large")
 
-# 修复：正确读取选中的点，加完整容错
+# 点击数据点解读（完整容错）
 try:
     if selected_event and hasattr(selected_event, 'selection') and selected_event.selection and selected_event.selection.points:
         point = selected_event.selection.points[0]
         point_year = int(point["x"])
         point_value = round(point["y"], 2)
         
-        # 选择对应解读
         analysis = tencent_point_analysis if main_company == "腾讯控股" else general_point_analysis
-        analysis_text = analysis.get(point_year, "该年份数据为历史记录，反映了当时的行业环境与公司经营状况。")
+        analysis_text = analysis.get(point_year, "该年份数据反映了当时的行业环境与公司经营状况。")
         
         st.markdown(f'''
         <div class="analysis-box">
@@ -694,32 +692,46 @@ with st.expander("💡 查看完整深度分析"):
     ''', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ========== 竞品对比 ==========
+# ========== 竞品对比（彻底修复 gradientcolor 报错） ==========
 if len(competitors) > 0:
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.subheader("🏆 同行业竞品横向对比分析")
     col1, col2 = st.columns(2)
     
-    colors = ["#ec4899", "#06b6d4", "#10b981"]
+    # 紫蓝渐变色阶（官方标准写法）
+    purple_gradient = [[0, "#a78bfa"], [1, "#4f46e5"]]
+    comp_colors = ["#ec4899", "#06b6d4", "#10b981"]
+    # 生成渐变数值数组
+    gradient_vals = [0.2, 0.5, 0.8, 1.0]
+    
     with col1:
         fig_rev = go.Figure()
+        # 主公司：使用数值数组 + colorscale 实现柱状渐变
         fig_rev.add_trace(go.Bar(
             x=main_data["年份"], y=main_data["营业收入"],
             name=main_company,
-            marker=dict(color=go.gradientcolor(x=[0,1], colors=["#6366f1", "#8b5cf6"])),
+            marker=dict(
+                color=gradient_vals,
+                colorscale=purple_gradient,
+                showscale=False
+            ),
             hovertemplate='%{y:.2f}亿元<extra></extra>'
         ))
+        # 竞品公司：纯色区分
         for i, comp in enumerate(competitors):
             fig_rev.add_trace(go.Bar(
                 x=all_data_dict[comp]["年份"], y=all_data_dict[comp]["营业收入"],
                 name=comp,
-                marker=dict(color=colors[i]),
+                marker_color=comp_colors[i],
                 hovertemplate='%{y:.2f}亿元<extra></extra>'
             ))
         fig_rev.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#334155'), title="营业收入对比(亿元)",
-            barmode="group", height=420,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            title="营业收入对比(亿元)",
+            barmode="group",
+            height=420,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
             yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
@@ -731,20 +743,27 @@ if len(competitors) > 0:
         fig_profit.add_trace(go.Bar(
             x=main_data["年份"], y=main_data["归母净利润"],
             name=main_company,
-            marker=dict(color=go.gradientcolor(x=[0,1], colors=["#6366f1", "#8b5cf6"])),
+            marker=dict(
+                color=gradient_vals,
+                colorscale=purple_gradient,
+                showscale=False
+            ),
             hovertemplate='%{y:.2f}亿元<extra></extra>'
         ))
         for i, comp in enumerate(competitors):
             fig_profit.add_trace(go.Bar(
                 x=all_data_dict[comp]["年份"], y=all_data_dict[comp]["归母净利润"],
                 name=comp,
-                marker=dict(color=colors[i]),
+                marker_color=comp_colors[i],
                 hovertemplate='%{y:.2f}亿元<extra></extra>'
             ))
         fig_profit.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#334155'), title="归母净利润对比(亿元)",
-            barmode="group", height=420,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            title="归母净利润对比(亿元)",
+            barmode="group",
+            height=420,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
             yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
@@ -781,14 +800,16 @@ if len(competitors) > 0:
         fig_radar.add_trace(go.Scatterpolar(
             r=[row[c] for c in cats], theta=cats, fill="toself",
             name=row["公司"],
-            line=dict(color="#6366f1" if i==0 else colors[i-1], width=2),
+            line=dict(color="#6366f1" if i==0 else comp_colors[i-1], width=2),
             opacity=0.7
         ))
     fig_radar.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#334155'),
         polar=dict(radialaxis=dict(visible=True, range=[0,100], gridcolor='rgba(148,163,184,0.12)'), bgcolor='rgba(255,255,255,0.5)'),
-        title="财务综合能力对比雷达图", height=500
+        title="财务综合能力对比雷达图",
+        height=500
     )
     st.plotly_chart(fig_radar, use_container_width=True)
     st.dataframe(comp_df.round(2), use_container_width=True, hide_index=True)
@@ -811,8 +832,10 @@ if main_company == "腾讯控股":
                              title="板块营收对比",
                              color_discrete_map={"增值服务营收":"#6366f1","金融科技及企业服务营收":"#ec4899","营销服务营收":"#06b6d4"})
         fig_biz_bar.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#334155'), height=420,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            height=420,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
             yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
@@ -834,8 +857,10 @@ if main_company == "腾讯控股":
                             hole=0.45)
         fig_biz_pie.update_traces(textposition='outside', textinfo='percent+label')
         fig_biz_pie.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#334155'), height=420
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            height=420
         )
         st.plotly_chart(fig_biz_pie, use_container_width=True)
 
@@ -858,12 +883,21 @@ if main_company == "腾讯控股":
             province_full_data, lat="纬度", lon="经度", size="营收(亿元)", color="营收(亿元)",
             hover_name="省份", projection="natural earth",
             title="中国全省份营收分布",
-            color_continuous_scale=px.colors.sequential.Purples, size_max=60
+            color_continuous_scale=px.colors.sequential.Purples,
+            size_max=60
         )
-        fig_map1.update_geos(scope="asia", center={"lat":35,"lon":105}, projection_scale=5,
-                            showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1", bgcolor='rgba(0,0,0,0)')
-        fig_map1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                              font=dict(color='#334155'), height=500, margin=dict(r=0,t=30,l=0,b=0))
+        fig_map1.update_geos(
+            scope="asia", center={"lat":35,"lon":105}, projection_scale=5,
+            showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1",
+            bgcolor='rgba(0,0,0,0)'
+        )
+        fig_map1.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            height=500,
+            margin=dict(r=0,t=30,l=0,b=0)
+        )
         st.plotly_chart(fig_map1, use_container_width=True)
     
     with m2:
@@ -871,12 +905,21 @@ if main_company == "腾讯控股":
             overseas_data, lat="纬度", lon="经度", size="营收(亿元)",
             hover_name="地区名称", projection="natural earth",
             title="海外大区营收分布",
-            color="地区名称", color_discrete_map={"东南亚":"#6366f1","欧美":"#ec4899","其他海外地区":"#06b6d4"},
+            color="地区名称",
+            color_discrete_map={"东南亚":"#6366f1","欧美":"#ec4899","其他海外地区":"#06b6d4"},
             size_max=60
         )
-        fig_map2.update_geos(showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1", bgcolor='rgba(0,0,0,0)')
-        fig_map2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                              font=dict(color='#334155'), height=500, margin=dict(r=0,t=30,l=0,b=0))
+        fig_map2.update_geos(
+            showland=True, landcolor="#f1f5f9", countrycolor="#cbd5e1",
+            bgcolor='rgba(0,0,0,0)'
+        )
+        fig_map2.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#334155'),
+            height=500,
+            margin=dict(r=0,t=30,l=0,b=0)
+        )
         st.plotly_chart(fig_map2, use_container_width=True)
 
 else:
@@ -901,13 +944,16 @@ for name, color in indices:
     fig_idx.add_trace(go.Scatter(
         x=main_data["年份"], y=main_data[name], name=name,
         line=dict(color=color, width=3),
-        fill='tozeroy', fillcolor=f'rgba{rgb + (0.08,)}',
+        fill='tozeroy',
+        fillcolor=f'rgba{rgb + (0.08,)}',
         marker=dict(size=8)
     ))
 
 fig_idx.update_layout(
-    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#334155'), height=470,
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'),
+    height=470,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
     yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
@@ -918,8 +964,8 @@ with st.expander("💡 查看财务指数深度分析"):
     st.markdown('''
     <div class="analysis-box">
         <h4>📉 财务健康度综合评估</h4>
-        <p><strong>盈利能力：</strong>毛利率保持高位，体现强大定价权和成本控制能力。</p>
-        <p><strong>偿债能力：</strong>资产负债率维持健康区间，财务结构稳健。</p>
+        <p><strong>盈利能力：</strong>毛利率保持高位，体现出强大的定价权和成本控制能力。</p>
+        <p><strong>偿债能力：</strong>资产负债率维持在健康区间，财务结构稳健。</p>
         <p><strong>运营效率：</strong>ROE表现优异，股东回报能力强。</p>
     </div>
     ''', unsafe_allow_html=True)
@@ -927,12 +973,16 @@ with st.expander("💡 查看财务指数深度分析"):
 # 资产结构面积图
 st.subheader("🏦 资产与负债权益结构")
 asset_df = main_data[["年份","总负债","股东权益"]].melt(id_vars="年份", var_name="构成", value_name="金额")
-fig_asset = px.area(asset_df, x="年份", y="金额", color="构成",
-                    color_discrete_map={"总负债":"#ec4899", "股东权益":"#6366f1"})
+fig_asset = px.area(
+    asset_df, x="年份", y="金额", color="构成",
+    color_discrete_map={"总负债":"#ec4899", "股东权益":"#6366f1"}
+)
 fig_asset.update_traces(stackgroup='one')
 fig_asset.update_layout(
-    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#334155'), height=420,
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'),
+    height=420,
     xaxis=dict(gridcolor='rgba(148,163,184,0.12)'),
     yaxis=dict(gridcolor='rgba(148,163,184,0.12)', zeroline=False)
 )
@@ -941,22 +991,29 @@ st.plotly_chart(fig_asset, use_container_width=True)
 # 五维能力雷达图
 st.subheader("🎯 财务五维能力评估")
 radar_vals = [
-    year_detail["毛利率%"]/50*100,
-    year_detail["净资产收益率%"]/30*100,
+    year_detail["毛利率%"] / 50 * 100,
+    year_detail["净资产收益率%"] / 30 * 100,
     100 - year_detail["资产负债率%"],
     max(year_detail["营收同比增速%"], 0) if not pd.isna(year_detail["营收同比增速%"]) else 0,
     year_detail["资产周转率"] * 100
 ]
 fig_radar_single = go.Figure(go.Scatterpolar(
-    r=radar_vals, theta=["盈利能力","收益水平","偿债安全","增长潜力","运营效率"],
-    fill="toself", name="综合评分",
+    r=radar_vals,
+    theta=["盈利能力","收益水平","偿债安全","增长潜力","运营效率"],
+    fill="toself",
+    name="综合评分",
     line=dict(color="#6366f1", width=2.5),
     fillcolor='rgba(99, 102, 241, 0.2)'
 ))
 fig_radar_single.update_layout(
-    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#334155'), height=500,
-    polar=dict(radialaxis=dict(visible=True, range=[0,100], gridcolor='rgba(148,163,184,0.12)'), bgcolor='rgba(255,255,255,0.5)')
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color='#334155'),
+    height=500,
+    polar=dict(
+        radialaxis=dict(visible=True, range=[0,100], gridcolor='rgba(148,163,184,0.12)'),
+        bgcolor='rgba(255,255,255,0.5)'
+    )
 )
 st.plotly_chart(fig_radar_single, use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
